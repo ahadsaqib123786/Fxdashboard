@@ -39,8 +39,9 @@ export async function getCandlesForSymbols(symbols, interval = "4h", outputsize 
     } catch (err) {
       results[symbol] = { error: err.message };
     }
-    // small delay to stay well under the 8 requests/minute free tier limit
-    await new Promise((r) => setTimeout(r, 500));
+    // spaced out to stay safely under the 8 requests/minute free tier limit,
+    // even if the dashboard is reloaded more than once in quick succession
+    await new Promise((r) => setTimeout(r, 1500));
   }
   return results;
 }

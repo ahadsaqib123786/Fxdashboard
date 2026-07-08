@@ -46,8 +46,18 @@ function structureBias(candles) {
 
 // Returns { score, bias, reason } for a single pair given its candles
 export function scorePair(symbol, candles) {
-  if (!candles || candles.error || candles.length < 10) {
-    return { symbol, score: 0, bias: "neutral", reason: "Insufficient data" };
+  if (!candles || candles.error) {
+    return {
+      symbol,
+      score: 0,
+      bias: "neutral",
+      reason: candles?.error
+        ? `Data unavailable: ${candles.error}`
+        : "Insufficient data",
+    };
+  }
+  if (candles.length < 10) {
+    return { symbol, score: 0, bias: "neutral", reason: "Insufficient data (too few candles returned)" };
   }
 
   const momentum = pctChange(candles);

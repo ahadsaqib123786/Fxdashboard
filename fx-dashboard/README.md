@@ -28,6 +28,10 @@ This is a standard Next.js app, so it deploys to Vercel's free tier in a few cli
 3. Add the two environment variables (`TWELVE_DATA_API_KEY`, `GEMINI_API_KEY`) in the Vercel project settings.
 4. Deploy.
 
+## Design system
+
+The dark, gold-accented "instrument panel" look lives in `styles/globals.css` as CSS variables at the top of the file (colors, fonts, radius). Change values there to re-theme the whole app. The signature bias gauge component is in `components/BiasGauge.js`, reused on both the Dashboard and AI Analysis tabs.
+
 ## Known limitations (v1, worth knowing before you rely on this)
 
 - **Bias logic is a rough approximation.** It scores momentum, range expansion, and basic swing high/low structure. It does NOT yet detect real order blocks, fair value gaps, or supply/demand zones the way you'd manually mark them on a chart. Treat it as a starting signal, not a finished ICT engine.

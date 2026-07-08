@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import BiasGauge from "../components/BiasGauge";
 
 const REFRESH_MS = 15 * 60 * 1000; // 15 minutes, tune based on your Twelve Data credit budget
 
@@ -28,7 +29,7 @@ export default function Dashboard() {
     return () => clearInterval(id);
   }, []);
 
-  if (loading && !data) return <p>Loading today's strongest pair...</p>;
+  if (loading && !data) return <p className="reason">Reading today's strongest pair...</p>;
   if (error) return <p className="error">Error: {error}</p>;
 
   const { strongest, ranked, updatedAt } = data;
@@ -36,14 +37,15 @@ export default function Dashboard() {
   return (
     <div>
       <h1>Today's Strongest Pair</h1>
+      <p className="subtitle">Ranked by momentum, volatility expansion, and structure across your watchlist.</p>
+
       <div className="card highlight">
-        <h2>{strongest.symbol}</h2>
-        <p className={`bias bias-${strongest.bias}`}>{strongest.bias.toUpperCase()}</p>
-        <p className="reason">{strongest.reason}</p>
+        <BiasGauge score={strongest.score} bias={strongest.bias} label={strongest.symbol} />
+        <p className="reason" style={{ marginTop: 16 }}>{strongest.reason}</p>
         <p className="timestamp">Updated {new Date(updatedAt).toLocaleTimeString()}</p>
       </div>
 
-      <h3>Full Watchlist</h3>
+      <h3 style={{ margin: "24px 0 4px 4px" }}>Full Watchlist</h3>
       <table className="table">
         <thead>
           <tr>
