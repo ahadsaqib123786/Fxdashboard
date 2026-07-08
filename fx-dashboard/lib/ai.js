@@ -2,7 +2,7 @@
 // into a readable analysis. Get a free key at https://aistudio.google.com/app/apikey
 
 const GEMINI_URL =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+  "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent";
 
 export async function generateAnalysis(pairData) {
   const apiKey = process.env.GEMINI_API_KEY;
