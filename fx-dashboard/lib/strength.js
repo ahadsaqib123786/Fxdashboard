@@ -1,10 +1,8 @@
-// v1 rule based bias engine.
-// This is a starting point, not a full ICT/SMC engine. It measures:
-//   - momentum: net directional move over the lookback window
-//   - range expansion: recent range vs average range (volatility/interest)
-//   - structure: whether price is making higher highs/lows or lower highs/lows
-// Combined into a single strength score per pair. Refine the weighting
-// and add real order block / FVG detection once this loop is working end to end.
+// v2 structure-first bias engine.
+// PRIMARY: market structure (BOS / CHOCH / swing sequence HH/HL vs LH/LL).
+// SECONDARY: momentum and range expansion reinforce but never override.
+
+import { detectSwingPoints, detectStructure } from "./smcOverlays";
 
 function pctChange(candles) {
   if (candles.length < 2) return 0;
@@ -25,72 +23,79 @@ function recentRangeExpansion(candles, lookback = 5) {
   return avgRange(recent) / avgRange(older);
 }
 
-function structureBias(candles) {
-  // Compare the last swing high/low to the prior swing high/low
-  const highs = candles.map((c) => c.high);
-  const lows = candles.map((c) => c.low);
-  const mid = Math.floor(candles.length / 2);
-
-  const recentHigh = Math.max(...highs.slice(mid));
-  const priorHigh = Math.max(...highs.slice(0, mid));
-  const recentLow = Math.min(...lows.slice(mid));
-  const priorLow = Math.min(...lows.slice(0, mid));
-
-  const higherHigh = recentHigh > priorHigh;
-  const higherLow = recentLow > priorLow;
-
-  if (higherHigh && higherLow) return 1; // bullish structure
-  if (!higherHigh && !higherLow) return -1; // bearish structure
-  return 0; // mixed / consolidating
+function swingSequenceBias(swings) {
+  const highs = swings.filter((s) => s.type === "high");
+  const lows = swings.filter((s) => s.type === "low");
+  if (highs.length < 2 || lows.length < 2) return { dir: 0, label: "insufficient confirmed swings" };
+  const hh = highs[highs.length - 1].price > highs[highs.length - 2].price;
+  const hl = lows[lows.length - 1].price > lows[lows.length - 2].price;
+  const lh = highs[highs.length - 1].price < highs[highs.length - 2].price;
+  const ll = lows[lows.length - 1].price < lows[lows.length - 2].price;
+  if (hh && hl) return { dir: 1, label: "higher highs and higher lows" };
+  if (lh && ll) return { dir: -1, label: "lower highs and lower lows" };
+  if (hh && !hl) return { dir: 0, label: "higher high but lower low — expansion, no clean bias" };
+  if (lh && !ll) return { dir: 0, label: "lower high but higher low — compression, no clean bias" };
+  return { dir: 0, label: "mixed swing structure" };
 }
 
-// Returns { score, bias, reason } for a single pair given its candles
+function structureState(events) {
+  const last = events[events.length - 1];
+  if (!last) return { dir: 0, label: "no confirmed break of structure yet", lastType: null };
+  const dir = last.direction === "bullish" ? 1 : -1;
+  return { dir, label: `most recent ${last.type} is ${last.direction}`, lastType: last.type };
+}
+
 export function scorePair(symbol, candles) {
   if (!candles || candles.error) {
     return {
       symbol,
       score: 0,
       bias: "neutral",
-      reason: candles?.error
-        ? `Data unavailable: ${candles.error}`
-        : "Insufficient data",
+      reason: candles?.error ? `Data unavailable: ${candles.error}` : "Insufficient data",
+      dataOk: false,
     };
   }
   if (candles.length < 10) {
-    return { symbol, score: 0, bias: "neutral", reason: "Insufficient data (too few candles returned)" };
+    return { symbol, score: 0, bias: "neutral", reason: "Insufficient data (too few candles returned)", dataOk: false };
   }
 
+  const swings = detectSwingPoints(candles);
+  const events = detectStructure(candles);
+  const struct = structureState(events);
+  const seq = swingSequenceBias(swings);
+
+  // PRIMARY: structural direction
+  let structuralDir = struct.dir !== 0 ? struct.dir : seq.dir;
+
+  // SECONDARY: momentum + expansion only nudge when they agree
   const momentum = pctChange(candles);
   const expansion = recentRangeExpansion(candles);
-  const structure = structureBias(candles);
+  const momentumDir = momentum > 0 ? 1 : momentum < 0 ? -1 : 0;
 
-  // Weighted composite score
-  const score =
-    momentum * 10 + // momentum dominates
-    (expansion - 1) * 20 + // reward volatility expansion
-    structure * 15; // reward clean directional structure
+  let score = structuralDir * 40;
+  if (seq.dir === structuralDir && structuralDir !== 0) score += structuralDir * 15;
+  if (momentumDir === structuralDir && structuralDir !== 0) score += structuralDir * Math.min(Math.abs(momentum) * 4, 15);
+  if (expansion > 1.2 && structuralDir !== 0) score += structuralDir * 5;
 
-  const bias = score > 5 ? "buy" : score < -5 ? "sell" : "neutral";
+  const bias = structuralDir > 0 ? "buy" : structuralDir < 0 ? "sell" : "neutral";
 
   const reasonParts = [];
-  reasonParts.push(
-    momentum > 0
-      ? `Price is up ${momentum.toFixed(2)}% over the lookback window`
-      : `Price is down ${Math.abs(momentum).toFixed(2)}% over the lookback window`
-  );
-  if (expansion > 1.2) reasonParts.push("recent candles show range expansion, signalling fresh interest");
-  if (structure === 1) reasonParts.push("structure shows higher highs and higher lows");
-  if (structure === -1) reasonParts.push("structure shows lower highs and lower lows");
-  if (structure === 0) reasonParts.push("structure is mixed, no clean directional bias yet");
+  reasonParts.push(struct.lastType ? `Structure: ${struct.label}` : "Structure: no confirmed break yet");
+  reasonParts.push(`Swing read: ${seq.label}`);
+  if (expansion > 1.2) reasonParts.push("range expansion adds secondary confidence");
+  reasonParts.push(momentum >= 0 ? `momentum +${momentum.toFixed(2)}% (secondary)` : `momentum ${momentum.toFixed(2)}% (secondary)`);
 
-  return { symbol, score, bias, reason: reasonParts.join(", ") + "." };
+  return {
+    symbol,
+    score,
+    bias,
+    reason: reasonParts.join(", ") + ".",
+    dataOk: true,
+    structure: { lastBreak: struct.lastType, sequence: seq.label },
+  };
 }
 
-// Ranks multiple pairs and returns the strongest one plus the full ranked list
 export function rankPairs(candlesBySymbol) {
-  const scored = Object.entries(candlesBySymbol).map(([symbol, candles]) =>
-    scorePair(symbol, candles)
-  );
+  const scored = Object.entries(candlesBySymbol).map(([symbol, candles]) => scorePair(symbol, candles));
   scored.sort((a, b) => Math.abs(b.score) - Math.abs(a.score));
   return { strongest: scored[0], ranked: scored };
-}
